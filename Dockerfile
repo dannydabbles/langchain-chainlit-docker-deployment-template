@@ -47,6 +47,7 @@ WORKDIR /home/appuser/app/
 COPY --chown=1001:1001 --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
 # Copy application files
+COPY ./.env /home/appuser/app/.env
 COPY ./chainlit.md /home/appuser/app/chainlit.md
 COPY --chown=1001:1001 ./.chainlit /home/appuser/app/.chainlit
 COPY ./demo_app /home/appuser/app/demo_app
