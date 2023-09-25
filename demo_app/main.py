@@ -1,17 +1,37 @@
 """Python file to serve as the frontend"""
-from langchain import OpenAI, LLMMathChain #SerpAPIWrapper?
+from langchain import OpenAI # LLMMathChain SerpAPIWrapper?
 from langchain.utilities import GoogleSearchAPIWrapper
-from langchain.agents import initialize_agent, Tool, AgentExecutor
+from langchain.agents import ZeroShotAgent, Tool, AgentExecutor
 from langchain.chat_models import ChatOpenAI
+from langchain.prompts import PromptTemplate
+from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
+from langchain.chains import LLMChain
 import os
 import chainlit as cl
 
 @cl.on_chat_start
 def start():
-    llm = ChatOpenAI(temperature=0, streaming=True)
-    llm1 = OpenAI(temperature=0, streaming=True)
+    llm = OpenAI(temperature=0, streaming=True)
+    llmc = ChatOpenAI(temperature=0, streaming=True)
     search = GoogleSearchAPIWrapper()
-    llm_math_chain = LLMMathChain.from_llm(llm=llm, verbose=True)
+
+    template = """This is a conversation between a human and a bot:
+
+    {chat_history}
+
+    Write a summary of the conversation for {input}:
+    """
+
+    prompt = PromptTemplate(input_variables=["input", "chat_history"], template=template)
+    memory = ConversationBufferMemory(memory_key="chat_history")
+    readonlymemory = ReadOnlySharedMemory(memory=memory)
+
+    summry_chain = LLMChain(
+        llm=llmc,
+        prompt=prompt,
+        verbose=True,
+        memory=readonlymemory,
+    )
 
     tools = [
         Tool(
@@ -20,15 +40,33 @@ def start():
             description="useful for when you need to answer questions about current events. You should ask targeted questions",
         ),
         Tool(
-            name="Calculator",
-            func=llm_math_chain.run,
-            description="useful for when you need to answer questions about math",
+            name="Summary",
+            func=summry_chain.run,
+            description="useful for when you summarize a conversation. The input to this tool should be a string, representing who will read this summary.",
         ),
     ]
-    agent = initialize_agent(
-        tools, llm1, agent="structured-chat-zero-shot-react-description", verbose=True
+
+    prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
+    suffix = """Begin!"
+
+    {chat_history}
+    Question: {input}
+    {agent_scratchpad}"""
+
+    prompt = ZeroShotAgent.create_prompt(
+        tools,
+        prefix=prefix,
+        suffix=suffix,
+        input_variables=["input", "chat_history", "agent_scratchpad"],
     )
-    cl.user_session.set("agent", agent)
+
+    llm_chain = LLMChain(llm=OpenAI(temperature=0), prompt=prompt)
+    agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
+    agent_chain = AgentExecutor.from_agent_and_tools(
+        agent=agent, tools=tools, verbose=True, memory=memory
+    )
+
+    cl.user_session.set("agent", agent_chain)
 
 @cl.on_message
 async def main(message: str):
