@@ -15,11 +15,12 @@ def start():
     llmc = ChatOpenAI(temperature=0, streaming=True)
     search = GoogleSearchAPIWrapper()
 
-    template = """This is a conversation between a human and a bot:
+    template = """This is a transcript of a D&D game:
 
     {chat_history}
 
-    Write a summary of the conversation for {input}:
+    Write a summary of updated game state after the player's turn:
+    {input}
     """
 
     prompt = PromptTemplate(input_variables=["input", "chat_history"], template=template)
@@ -35,22 +36,25 @@ def start():
 
     tools = [
         Tool(
-            name="Search",
+            name="Fact Search",
             func=search.run,
-            description="useful for when you need to answer questions about current events. You should ask targeted questions",
+            description="useful for when you need to answer questions about D&D rules, or look up facts for reference. You should ask targeted questions",
         ),
         Tool(
-            name="Summary",
+            name="Game State Tracker",
             func=summry_chain.run,
             description="useful for when you summarize a conversation. The input to this tool should be a string, representing who will read this summary.",
         ),
     ]
 
-    prefix = """Have a conversation with a human, answering the following questions as best you can. You have access to the following tools:"""
-    suffix = """Begin!"
-
+    prefix = """Act as a Dungeon Master keeping game notes, interacting with the player and helping move the story forward. You have access to the following tools:"""
+    suffix = """Game History:
     {chat_history}
-    Question: {input}
+
+    Player's Turn:
+    {input}
+
+    Scratchpad:
     {agent_scratchpad}"""
 
     prompt = ZeroShotAgent.create_prompt(
