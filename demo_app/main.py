@@ -72,12 +72,14 @@ def start():
             name="Dungeon Master's Reply",
             func=reply,
             description="useful for when the Dungeon Master is ready to reply to the player.",
-            return_direct=True
         ),
     ]
 
-    prefix = """Act as a Dungeon Master having a conversation with a player, interacting with the player and helping move the story forward. Do not impersonate the player. You have access to the following tools:"""
-    suffix = """Reply to the player after they say: {input}
+    prefix = """Act as a Dungeon Master replying to the player, helping move the story forward. Do not impersonate the player or take more than one speech turn. You have access to the following tools:"""
+    suffix = """Reply to the player after their speech turn below.  Your reply should take into account the game state, and take into account anything in the scratchpad.
+
+    Player:
+    {input}
 
     D&D Campaign State:
     {game_state}
@@ -95,7 +97,13 @@ def start():
     llm_chain = LLMChain(llm=llmc, prompt=prompt, verbose=True)
     agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
     agent_chain = AgentExecutor.from_agent_and_tools(
-        agent=agent, tools=tools, verbose=True, memory=memory, handle_parsing_errors="Check your output and make sure it conforms!"
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        memory=memory,
+        handle_parsing_errors="Check your output and make sure it conforms!",
+        max_iterations=2,
+        early_stopping_method="generate",
     )
 
     #agent = initialize_agent(
