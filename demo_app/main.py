@@ -61,21 +61,22 @@ def start():
         Tool(
             name="D&D Reference",
             func=search.run,
-            description="useful for when you need to answer questions about D&D rules, or look up facts for reference. You should ask targeted questions",
+            description="useful for when you need to answer questions about D&D rules, or look up facts or ideas for reference. You should ask targeted questions.",
         ),
         Tool(
             name="Game State Tracker",
             func=summry_chain.run,
-            description="useful for when you summarize a conversation. The input to this tool should be a string, representing who will read this summary.",
+            description="useful for when you summarize the state of the game or campaign.",
         ),
         Tool(
             name="Dungeon Master's Reply",
             func=reply,
             description="useful for when the Dungeon Master is ready to reply to the player.",
+            #return_direct=True,
         ),
     ]
 
-    prefix = """Act as a Dungeon Master replying to the player, helping move the story forward. Do not impersonate the player or take more than one speech turn. You have access to the following tools:"""
+    prefix = """Act as a Dungeon Master. Summarize the game state, think about what can happen next in a fun D&D 5e game, get creative, and finally reply to the user. Do not impersonate the player or take more than one speech turn. You have access to the following tools:"""
     suffix = """Reply to the player after their speech turn below.  Your reply should take into account the game state, and take into account anything in the scratchpad.
 
     Player:
@@ -102,7 +103,7 @@ def start():
         verbose=True,
         memory=memory,
         handle_parsing_errors="Check your output and make sure it conforms!",
-        max_iterations=2,
+        max_iterations=10,
         early_stopping_method="generate",
     )
 
