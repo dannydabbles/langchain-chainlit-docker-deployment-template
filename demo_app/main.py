@@ -18,7 +18,7 @@ def create_chain(llm, template_str, memory):
 @cl.on_chat_start
 def start():
     memory = cl.user_session.get("memory") or ConversationBufferMemory(memory_key="game_state")
-    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-4")
+    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-3.5-turbo")
     search = GoogleSearchAPIWrapper()
 
     tools_data = {
@@ -61,13 +61,20 @@ def start():
     # Add more tools as needed
     tools.append(Tool(name="Dungeons and Dragons Reference", func=search.run, description="useful for answering D&D questions"))
 
-    prefix = "How would you, a Dungeon Master, reply to the player's message..."
-    suffix = """You are a Dungeon Master speaking with a player...
+    prefix = """Reply to the player's message directly as this one person one shot campaign's Dungeon Master...
 
     Player's message: {input}
-    Campaign Summary: {game_state}
-    Dungeon Master Scratchpad: {agent_scratchpad}
     """
+    suffix = """You are a Dungeon Master replying to a player's message, considering it's affect on the campaign state, you want to riff with the player...
+
+    Player's message: {input}
+    Campaign State: {game_state}
+
+    The Dungeon Master daydreams about what might happen next in the campaign...
+
+    {agent_scratchpad}
+    """
+    # Dungeon Master Scratchpad: {agent_scratchpad}
 
     prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "game_state", "agent_scratchpad"])
     llm_chain = LLMChain(llm=llmc, prompt=prompt, verbose=True)
@@ -78,8 +85,9 @@ def start():
         tools=tools,
         verbose=True,
         memory=memory,
-        handle_parsing_errors="Check your output and make sure it makes sense...",
-        max_iterations=3,
+        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+        max_iterations=10,
+        early_stopping_method="generate",
     )
 
     cl.user_session.set("agent", agent_chain)
