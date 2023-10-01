@@ -1,13 +1,14 @@
 """Python file to serve as the frontend"""
 from langchain import OpenAI # LLMMathChain SerpAPIWrapper?
 from langchain.utilities import GoogleSearchAPIWrapper
-from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor
+from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
 from langchain.chains import LLMChain
 import os
 import chainlit as cl
+from langchain import hub
 
 
 def create_chain(llm, template_str, memory):
@@ -18,7 +19,8 @@ def create_chain(llm, template_str, memory):
 @cl.on_chat_start
 def start():
     memory = cl.user_session.get("memory") or ConversationBufferMemory(memory_key="game_state")
-    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-3.5-turbo")
+    llm = OpenAI(temperature=0, streaming=True)
+    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-4")
     search = GoogleSearchAPIWrapper()
 
     tools_data = {
@@ -51,7 +53,7 @@ def start():
         template_str = tool_info["template"]
         description = tool_info["description"]
 
-        chain = create_chain(llmc, template_str, memory)
+        chain = create_chain(llm, template_str, memory)
         tool = Tool(name=tool_name, func=chain.run, description=description)
         tools.append(tool)
 
@@ -78,8 +80,8 @@ def start():
 
     prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "game_state", "agent_scratchpad"])
     llm_chain = LLMChain(llm=llmc, prompt=prompt, verbose=True)
-    agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
 
+    agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
     agent_chain = AgentExecutor.from_agent_and_tools(
         agent=agent,
         tools=tools,
@@ -89,6 +91,17 @@ def start():
         max_iterations=10,
         early_stopping_method="generate",
     )
+
+    #agent_chain = initialize_agent(
+    #    agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
+    #    tools=tools,
+    #    verbose=True,
+    #    memory=memory,
+    #    handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+    #    max_iterations=10,
+    #    #early_stopping_method="generate",
+    #    llm=llmc,
+    #)
 
     cl.user_session.set("agent", agent_chain)
     cl.user_session.set("memory", memory)
