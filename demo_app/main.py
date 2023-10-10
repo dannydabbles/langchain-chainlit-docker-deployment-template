@@ -4,111 +4,166 @@ from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationBufferMemory, ReadOnlySharedMemory
-from langchain.chains import LLMChain
+from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory
+from langchain.chains import LLMMathChain, LLMChain, ConversationChain
 import os
 import chainlit as cl
 from langchain import hub
 
 
-def create_chain(llm, template_str, memory):
-    prompt = PromptTemplate(input_variables=["input", "game_state"], template=template_str)
-    readonly_memory = ReadOnlySharedMemory(memory=memory)
-    return LLMChain(llm=llm, prompt=prompt, verbose=True, memory=readonly_memory)
+def create_chain(chain_type, llm, input_variables, template_str, memory):
+    prompt = PromptTemplate(
+        input_variables=input_variables,
+        template=template_str,
+    )
 
-@cl.on_chat_start
-def start():
-    memory = cl.user_session.get("memory") or ConversationBufferMemory(memory_key="game_state")
-    llm = OpenAI(temperature=0, streaming=True)
-    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-4")
-    search = GoogleSearchAPIWrapper()
+    return chain_type(
+        llm=llm,
+        prompt=prompt,
+        verbose=True,
+        memory=memory,
+    )
 
+def roll_dice(x: int, y: int) -> int:
+    return sum([random.randint(1, y) for _ in range(x)])
+
+def get_memory(llm):
+    memory_buffer = ConversationTokenBufferMemory(
+        llm=llm,
+        memory_key="buffer",
+        max_tokens=1000,
+        ai_prefix="Dungeon Master:",
+        human_prefix="Player Character:",
+        input_key="input",
+    )
+    memory_entity = ConversationKGMemory(
+        llm=llm,
+        memory_key="entities",
+        input_key="input",
+    )
+
+    combined = CombinedMemory(memories=[memory_buffer, memory_entity])
+
+    return combined
+
+def get_conversation_chain(llm, memory, tools, prompt="You are an AI Dungeon Master for a D&D 5e campaign, what do you say next?"):
+
+    agent = initialize_agent(
+        llm=llm,
+        agent_type=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+        tools=tools,
+        memory=memory,
+        verbose=True,
+        max_iterations=10,
+        early_stopping_method="generate",
+        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+        prompt=prompt,
+        ai_prefix="Dungeon Master:",
+        human_prefix="Player Character:",
+    )
+
+    return agent
+
+def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master for a D&D 5e campaign, what do you say next?"):
+
+    agent = LLMMathChain(
+        llm=llm,
+        tools=tools,
+        memory=memory,
+        verbose=True,
+        max_iterations=10,
+        early_stopping_method="generate",
+        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+        prompt=prompt,
+        ai_prefix="Dungeon Master:",
+        human_prefix="Player Character:",
+    )
+
+    return agent
+
+def get_tools(llm, memory):
     tools_data = {
-        "Campaign State Tracker": {
-            "template": """The player just said "{input}".  Summarize the updated state of the game after the player's turn.\n\nCampaign Summary: {game_state}""",
-            "description": "Summarizes the current state of the D&D campaign, incorporating the latest player actions. Useful for maintaining a coherent game state."
-        },
         "Campaign Start": {
-            "template": """A new D&D is about to begin, get the ball rolling.  As Dungeon Master for this D&D this campaign, what should happen next after a player says "{input}"?\n\nCampaign Summary: {game_state}""",
-            "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting."
-        },
-        "Dungeon Master Thoughts": {
-            "template": """As Dungeon Master for the current D&D 5e campaign, I need to decide what should happen next after a player says "{input}".\n\nCampaign Summary: {game_state}""",
-            "description": "Generates the Dungeon Master's internal thoughts about the ongoing campaign, offering insights into possible future developments. Useful for internal planning and decision-making."
-        },
-        "Dungeon Master Reply": {
-            "template": """As Dungeon Master for the current D&D 5e campaign, what should I reply to a player that just said "{input}"?\n\nCampaign Summary: {game_state}""",
-            "description": "Generates the Dungeon Master's immediate spoken reply to a player's action or query. Useful for real-time interactions with players."
+            "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling.
+
+What should happen next after a player says the following?:
+{input}
+
+Campaign History:
+{buffer}
+
+Campaign Entities Data:
+
+{entities}
+
+Dungeon Master:""",
+            "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting.",
+            "input_variables": ["input", "buffer", "entities"],
+            "chain_type": ConversationChain,
         },
         "Dice Check": {
-            "template": """As Dungeon Master for the current D&D 5e campaign, you should ask for a dice check from the player after they say "{input}".  You may choose to reveal the DC for the roll or not.\n\nCampaign Summary: {game_state}""",
-            "description": "Determines whether a dice check is needed in response to a player's action, and what the parameters of that check should be. Useful for integrating gameplay mechanics into the narrative."
+            "template": """As Dungeon Master for the current D&D 5e campaign, you should roll dice to determine what happens next.  You may choose to reveal the DC for the roll or not.
+
+What roll should happen next after a player says the following?:
+{input}
+
+Campaign History:
+{buffer}
+
+Campaign Entities Data:
+{entities}
+
+Dungeon Master:""",
+            "description": "Determines whether a dice check is needed in response to a player's action, and what the parameters of that check should be. Useful for integrating D&D 5e gameplay mechanics into the narrative.",
+            "input_variables": ["input", "buffer", "entities"],
+            "chain_type": LLMMathChain,
         },
-    }
+        "Dungeons and Dragons Reference": {
+            "description": "Searches the internet for information about Dungeons and Dragons.",
+            "function": cl.user_session.get("search").run,
+        },
+    }       
 
     templates = []
     descriptions = []
     tools = []
     for tool_name, tool_info in tools_data.items():
-        template_str = tool_info["template"]
         description = tool_info["description"]
 
-        chain = create_chain(llm, template_str, memory)
-        tool = Tool(name=tool_name, func=chain.run, description=description)
+        if 'function' in tool_info:
+            func = tool_info['function']
+            tool = Tool(name=tool_name, func=func, description=description)
+        else:
+            template_str = tool_info["template"]
+            input_variables = tool_info["input_variables"]
+            chain_type = tool_info["chain_type"]
+            chain = create_chain(chain_type, llm, input_variables, template_str, memory)
+            tool = Tool(name=tool_name, func=chain.run, description=description)
         tools.append(tool)
 
-    def roll_dice(x: int, y: int) -> int:
-        return sum([random.randint(1, y) for _ in range(x)])
+    return tools
 
-    # Add more tools as needed
-    tools.append(Tool(name="Dungeons and Dragons Reference", func=search.run, description="useful for answering D&D questions"))
+@cl.on_chat_start
+def start():
+    llm = OpenAI(temperature=0, streaming=True)
+    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-3.5-turbo")
+    search = GoogleSearchAPIWrapper()
 
-    prefix = """Reply to the player's message directly as this one person one shot campaign's Dungeon Master...
+    cl.user_session.set("llm", llm)
+    cl.user_session.set("llmc", llmc)
+    cl.user_session.set("search", search)
 
-    Player's message: {input}
-    """
-    suffix = """You are a Dungeon Master replying to a player's message, considering it's affect on the campaign state, you want to riff with the player...
-
-    Player's message: {input}
-    Campaign State: {game_state}
-
-    The Dungeon Master daydreams about what might happen next in the campaign...
-
-    {agent_scratchpad}
-    """
-    # Dungeon Master Scratchpad: {agent_scratchpad}
-
-    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "game_state", "agent_scratchpad"])
-    llm_chain = LLMChain(llm=llmc, prompt=prompt, verbose=True)
-
-    agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
-    agent_chain = AgentExecutor.from_agent_and_tools(
-        agent=agent,
-        tools=tools,
-        verbose=True,
-        memory=memory,
-        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
-        max_iterations=10,
-        early_stopping_method="generate",
-    )
-
-    #agent_chain = initialize_agent(
-    #    agent=AgentType.STRUCTURED_CHAT_ZERO_SHOT_REACT_DESCRIPTION,
-    #    tools=tools,
-    #    verbose=True,
-    #    memory=memory,
-    #    handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
-    #    max_iterations=10,
-    #    #early_stopping_method="generate",
-    #    llm=llmc,
-    #)
+    memory = get_memory(llmc)
+    tools = get_tools(llmc, memory)
+    agent_chain = get_conversation_chain(llmc, memory, tools)
 
     cl.user_session.set("agent", agent_chain)
     cl.user_session.set("memory", memory)
+    cl.user_session.set("tools", tools)
 
 @cl.on_message
 async def main(message: str):
     agent = cl.user_session.get("agent")
     cb = cl.LangchainCallbackHandler(stream_final_answer=True)
-    reply = await cl.make_async(agent.run)(message, callbacks=[cb])
+    reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
     print(f"Reply: {reply}")
