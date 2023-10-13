@@ -7,15 +7,27 @@ from langchain.prompts import PromptTemplate
 from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory
 from langchain.chains import LLMMathChain, LLMChain, ConversationChain
 import os
+import random
 import chainlit as cl
 from langchain import hub
 
 
 def create_chain(chain_type, llm, input_variables, template_str, memory):
-    prompt = PromptTemplate(
-        input_variables=input_variables,
-        template=template_str,
-    )
+
+    if template_str:
+        prompt = PromptTemplate(
+            input_variables=input_variables,
+            template=template_str,
+        )
+
+    if chain_type == LLMMathChain:
+        return chain_type(
+            llm=llm,
+            #prompt=prompt,
+            verbose=True,
+            #memory=memory,
+            input_key="input",
+        )
 
     return chain_type(
         llm=llm,
@@ -26,6 +38,12 @@ def create_chain(chain_type, llm, input_variables, template_str, memory):
 
 def roll_dice(x: int, y: int) -> int:
     return sum([random.randint(1, y) for _ in range(x)])
+
+def roll_dice_parser(input_str: str) -> str:
+    nums = input_str.split(',')
+    x = int(nums[0])
+    y = int(nums[1])
+    return str(roll_dice(x, y))
 
 def get_memory(llm):
     memory_buffer = ConversationTokenBufferMemory(
@@ -138,22 +156,9 @@ Dungeon Master:""",
             "input_variables": ["input", "buffer", "entities"],
             "chain_type": ConversationChain,
         },
-        "Dice Check": {
-            "template": """As Dungeon Master for the current D&D 5e campaign, you should roll dice to determine what happens next.  You may choose to reveal the DC for the roll or not.
-
-What roll should happen next after a player says the following?:
-{input}
-
-Campaign History:
-{buffer}
-
-Campaign Entities Data:
-{entities}
-
-Dungeon Master:""",
-            "description": "Determines whether a dice check is needed in response to a player's action, and what the parameters of that check should be. Useful for integrating D&D 5e gameplay mechanics into the narrative.",
-            "input_variables": ["input", "buffer", "entities"],
-            "chain_type": LLMMathChain,
+        "Dice Rolling Assistant": {
+            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers of length 2, representing the number of dice followed by the number or sides on each die. For example, '10,4' would be the input if you wanted to roll 10d4 dice.",
+            "function": roll_dice_parser,
         },
         "Dungeons and Dragons Reference": {
             "description": "Searches the internet for information about Dungeons and Dragons.",
@@ -161,8 +166,6 @@ Dungeon Master:""",
         },
     }
 
-    templates = []
-    descriptions = []
     tools = []
     for tool_name, tool_info in tools_data.items():
         description = tool_info["description"]
@@ -171,7 +174,7 @@ Dungeon Master:""",
             func = tool_info['function']
             tool = Tool(name=tool_name, func=func, description=description)
         else:
-            template_str = tool_info["template"]
+            template_str = tool_info.get("template", None)
             input_variables = tool_info["input_variables"]
             chain_type = tool_info["chain_type"]
             return_direct = tool_info.get("return_direct", False)
@@ -185,7 +188,7 @@ Dungeon Master:""",
 @cl.on_chat_start
 def start():
     llm = OpenAI(temperature=0, streaming=True)
-    llmc = ChatOpenAI(temperature=0, streaming=True, model="gpt-3.5-turbo")
+    llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo")
     search = GoogleSearchAPIWrapper()
 
     cl.user_session.set("llm", llm)
@@ -206,7 +209,8 @@ async def main(message: str):
     cb = cl.LangchainCallbackHandler(stream_final_answer=True)
     reply = None
     if cl.user_session.get("chain_type") == LLMMathChain:
-        reply = await cl.make_async(agent.run)(message, callbacks=[cb])
+        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
+        #reply = await cl.make_async(agent.run)(message, callbacks=[cb])
     elif cl.user_session.get("chain_type") == ConversationChain:
         reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
     print(f"Reply: {reply}")
