@@ -80,33 +80,30 @@ Campaign History:
 Campaign Entities Data:
 
 {entities}
-
-Dungeon Master:"""
+"""
     )
 
     prefix = """Reply to the player's message directly as this one person one shot campaign's Dungeon Master...
 
-    You have access to the following tools:
+You have access to the following tools:
     """
-    suffix = """You are a Dungeon Master replying to a player's message, considering it's affect on the campaign state, you want to riff with the player...
+    suffix = """You are a Dungeon Master replying to a player's message in a one shot D&D 5e campaign. Only reply as a real Dungeon Master would, and don't ever break character.
 
-    Player's message:
-    {input}
+Player's message:
+{input}
 
-    Campaign History:
-    {buffer}
+Campaign History:
+{buffer}
 
-    Campaign Entities Data:
-    {entities}
-
-    The Dungeon Master daydreams about what might happen next in the campaign...
-
-    {agent_scratchpad}
-    """
+Campaign Entities Data:
+{entities}
+"""
+#{agent_scratchpad}
+#"""
     # Dungeon Master Scratchpad: {agent_scratchpad}
 
-    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities", "agent_scratchpad"])
-    llm_chain = LLMChain(llm=llm, prompt=prompt, verbose=True)
+    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities"])
+    llm_chain = ConversationChain(llm=llm, prompt=prompt, verbose=True, memory=memory)
 
     agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
     agent_chain = AgentExecutor.from_agent_and_tools(
@@ -158,7 +155,7 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master f
 def get_tools(llm, memory):
     tools_data = {
         "Dungeon Master Speaks": {
-            "template": """As the Dungeon Master for this D&D 5e campaign, I should decide what to say next to the player.
+            "template": """As the Dungeon Master for this D&D 5e one shot campaign, I should decide what to say next to the player. Only reply as a real Dungeon Master would, and don't ever break character. 
 
 What should I say to the player?:
 {input}
@@ -167,13 +164,12 @@ Campaign History:
 {buffer}
 
 Campaign Entities Data:
-
 {entities}
 
-Dungeon Master:""",
+""",
             "description": "Useful for when the Dungeon Master is done considering what the player said and looking up any information they need. The input to this tool should be what the player said, followed by the Dungeon Master's current notes.  The result of this tool should be the Dungeon Master's response to the player.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": LLMChain,
+            "chain_type": ConversationChain,
             "return_direct": True,
         },
         "Dungeon Master Considering": {
@@ -186,16 +182,15 @@ Campaign History:
 {buffer}
 
 Campaign Entities Data:
-
 {entities}
 
-Dungeon Master:""",
+""",
             "description": "Useful for when the Dungeon Master is unsure of what to do next and needs to consider their options. The input to this tool should be what the Dungeon Master is considering based on what the player said.  The result of this tool should be the Dungeon Master's thoughts on the topic.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": LLMChain,
+            "chain_type": ConversationChain,
         },
         "Campaign Start": {
-            "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling.
+            "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling. Only reply as a real Dungeon Master would, and don't ever break character.
 
 What should I say to begin this campaign?:
 {input}
@@ -204,13 +199,12 @@ Campaign History:
 {buffer}
 
 Campaign Entities Data:
-
 {entities}
 
-Dungeon Master:""",
+""",
             "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting. The input to this tool should be a unique one sentence made up story description based on what the player just said. The output of this tool should be what the Dungeon Master says to start the campaign.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": LLMChain,
+            "chain_type": ConversationChain,
             "return_direct": True,
         },
         "Dice Rolling Assistant": {
@@ -225,6 +219,8 @@ Dungeon Master:""",
     
     # Remove "Dungeon Master Considering" tool for now
     del tools_data["Dungeon Master Considering"]
+    del tools_data["Campaign Start"]
+    #del tools_data["Dungeon Master Speaks"]
 
     tools = []
     for tool_name, tool_info in tools_data.items():
