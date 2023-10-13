@@ -54,7 +54,7 @@ def get_conversation_chain(llm, memory, tools, prompt="You are an AI Dungeon Mas
         tools=tools,
         memory=memory,
         verbose=True,
-        max_iterations=10,
+        max_iterations=3,
         early_stopping_method="generate",
         handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
         prompt=prompt,
@@ -83,6 +83,43 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master f
 
 def get_tools(llm, memory):
     tools_data = {
+        "Dungeon Master Speaks": {
+            "template": """As the Dungeon Master for this D&D 5e campaign, I should decide what to say next if I'm done considering what the player said and looking up any information I need.
+
+What should happen next after a player says the following?:
+{input}
+
+Campaign History:
+{buffer}
+
+Campaign Entities Data:
+
+{entities}
+
+Dungeon Master:""",
+            "description": "Useful for when the Dungeon Master is done considering what the player said and looking up any information they need.",
+            "input_variables": ["input", "buffer", "entities"],
+            "chain_type": ConversationChain,
+            "return_direct": True,
+        },
+        "Dungeon Master Considering": {
+            "template": """As the Dungeon Master for this D&D 5e campaign, you should consider what should happen next.
+
+What should happen next after a player says the following?:
+{input}
+
+Campaign History:
+{buffer}
+
+Campaign Entities Data:
+
+{entities}
+
+Dungeon Master:""",
+            "description": "Useful for when the Dungeon Master is unsure of what to do next and needs to consider their options.",
+            "input_variables": ["input", "buffer", "entities"],
+            "chain_type": ConversationChain,
+        },
         "Campaign Start": {
             "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling.
 
@@ -122,7 +159,7 @@ Dungeon Master:""",
             "description": "Searches the internet for information about Dungeons and Dragons.",
             "function": cl.user_session.get("search").run,
         },
-    }       
+    }
 
     templates = []
     descriptions = []
@@ -137,8 +174,10 @@ Dungeon Master:""",
             template_str = tool_info["template"]
             input_variables = tool_info["input_variables"]
             chain_type = tool_info["chain_type"]
+            return_direct = tool_info.get("return_direct", False)
+            cl.user_session.set("chain_type", chain_type)
             chain = create_chain(chain_type, llm, input_variables, template_str, memory)
-            tool = Tool(name=tool_name, func=chain.run, description=description)
+            tool = Tool(name=tool_name, func=chain.run, description=description, return_direct=return_direct)
         tools.append(tool)
 
     return tools
@@ -165,5 +204,9 @@ def start():
 async def main(message: str):
     agent = cl.user_session.get("agent")
     cb = cl.LangchainCallbackHandler(stream_final_answer=True)
-    reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
+    reply = None
+    if cl.user_session.get("chain_type") == LLMMathChain:
+        reply = await cl.make_async(agent.run)(message, callbacks=[cb])
+    elif cl.user_session.get("chain_type") == ConversationChain:
+        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
     print(f"Reply: {reply}")
