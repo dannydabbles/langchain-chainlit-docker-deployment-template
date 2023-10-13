@@ -51,8 +51,8 @@ def get_memory(llm):
         llm=llm,
         memory_key="buffer",
         max_tokens=1000,
-        ai_prefix="Dungeon Master:",
-        human_prefix="Player Character:",
+        ai_prefix="Dungeon Master",
+        human_prefix="Player Character",
         input_key="input",
     )
     memory_entity = ConversationKGMemory(
@@ -83,22 +83,60 @@ Campaign Entities Data:
 
 Dungeon Master:"""
     )
-    agent = initialize_agent(
-        llm=llm,
-        agent_type=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+
+    prefix = """Reply to the player's message directly as this one person one shot campaign's Dungeon Master...
+
+    You have access to the following tools:
+    """
+    suffix = """You are a Dungeon Master replying to a player's message, considering it's affect on the campaign state, you want to riff with the player...
+
+    Player's message:
+    {input}
+
+    Campaign History:
+    {buffer}
+
+    Campaign Entities Data:
+    {entities}
+
+    The Dungeon Master daydreams about what might happen next in the campaign...
+
+    {agent_scratchpad}
+    """
+    # Dungeon Master Scratchpad: {agent_scratchpad}
+
+    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities", "agent_scratchpad"])
+    llm_chain = LLMChain(llm=llm, prompt=prompt, verbose=True)
+
+    agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
+    agent_chain = AgentExecutor.from_agent_and_tools(
+        agent=agent,
         tools=tools,
-        memory=memory,
         verbose=True,
+        memory=memory,
+        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
         max_iterations=10,
         early_stopping_method="generate",
-        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
-        prompt=prompt,
-        ai_prefix="Dungeon Master:",
-        human_prefix="Player Character:",
-        input_key="input",
     )
 
-    return agent
+    #agent = initialize_agent(
+    #    llm=llm,
+    #    agent_type=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
+    #    tools=tools,
+    #    memory=memory,
+    #    verbose=True,
+    #    max_iterations=10,
+    #    early_stopping_method="generate",
+    #    handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+    #    prompt=prompt,
+    #    ai_prefix="Dungeon Master",
+    #    human_prefix="Player Character",
+    #    input_key="input",
+    #)
+
+    #return agent
+
+    return agent_chain
 
 def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master for a D&D 5e campaign, what do you say next?"):
 
@@ -111,8 +149,8 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master f
         early_stopping_method="generate",
         handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
         prompt=prompt,
-        ai_prefix="Dungeon Master:",
-        human_prefix="Player Character:",
+        ai_prefix="Dungeon Master",
+        human_prefix="Player Character",
     )
 
     return agent
@@ -184,6 +222,9 @@ Dungeon Master:""",
             "function": cl.user_session.get("search").run,
         },
     }
+    
+    # Remove "Dungeon Master Considering" tool for now
+    del tools_data["Dungeon Master Considering"]
 
     tools = []
     for tool_name, tool_info in tools_data.items():
