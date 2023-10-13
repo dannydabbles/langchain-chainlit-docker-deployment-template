@@ -40,10 +40,11 @@ def roll_dice(x: int, y: int) -> int:
     return sum([random.randint(1, y) for _ in range(x)])
 
 def roll_dice_parser(input_str: str) -> str:
-    nums = input_str.split(',')
-    x = int(nums[0])
-    y = int(nums[1])
-    return str(roll_dice(x, y))
+    dice_nums = [int(x.strip()) for x in input_str.split(",")]
+    dice_rolls = [roll_dice(x, y) for x, y in zip(dice_nums[::2], dice_nums[1::2])]
+    total = sum(dice_rolls)
+    dice_description = [f"{x}d{y}" for x, y in zip(dice_nums[::2], dice_nums[1::2])]
+    return f"Rolling {', '.join(dice_description)}: {', '.join([str(x) for x in dice_rolls])}. Total: {total}"
 
 def get_memory(llm):
     memory_buffer = ConversationTokenBufferMemory(
@@ -157,7 +158,7 @@ Dungeon Master:""",
             "chain_type": ConversationChain,
         },
         "Dice Rolling Assistant": {
-            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers of length 2, representing the number of dice followed by the number or sides on each die. For example, '10,4' would be the input if you wanted to roll 10d4 dice.",
+            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice.",
             "function": roll_dice_parser,
         },
         "Dungeons and Dragons Reference": {
