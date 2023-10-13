@@ -4,7 +4,7 @@ from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate
-from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory
+from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory, ReadOnlySharedMemory
 from langchain.chains import LLMMathChain, LLMChain, ConversationChain
 import os
 import random
@@ -33,7 +33,7 @@ def create_chain(chain_type, llm, input_variables, template_str, memory):
         llm=llm,
         prompt=prompt,
         verbose=True,
-        memory=memory,
+        memory=ReadOnlySharedMemory(memory=memory),
     )
 
 def roll_dice(x: int, y: int) -> int:
@@ -65,20 +65,37 @@ def get_memory(llm):
 
     return combined
 
-def get_conversation_chain(llm, memory, tools, prompt="You are an AI Dungeon Master for a D&D 5e campaign, what do you say next?"):
+def get_conversation_chain(llm, memory, tools):
 
+    prompt = PromptTemplate(
+        input_variables=["input", "buffer", "entities"],
+        template="""As the Dungeon Master for this D&D 5e campaign, you should decide what to say next to the player.
+
+What should I say to the player?:
+{input}
+
+Campaign History:
+{buffer}
+
+Campaign Entities Data:
+
+{entities}
+
+Dungeon Master:"""
+    )
     agent = initialize_agent(
         llm=llm,
-        agent_type=AgentType.CONVERSATIONAL_REACT_DESCRIPTION,
+        agent_type=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
         tools=tools,
         memory=memory,
         verbose=True,
-        max_iterations=3,
+        max_iterations=10,
         early_stopping_method="generate",
         handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
         prompt=prompt,
         ai_prefix="Dungeon Master:",
         human_prefix="Player Character:",
+        input_key="input",
     )
 
     return agent
@@ -103,9 +120,9 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master f
 def get_tools(llm, memory):
     tools_data = {
         "Dungeon Master Speaks": {
-            "template": """As the Dungeon Master for this D&D 5e campaign, I should decide what to say next if I'm done considering what the player said and looking up any information I need.
+            "template": """As the Dungeon Master for this D&D 5e campaign, I should decide what to say next to the player.
 
-What should happen next after a player says the following?:
+What should I say to the player?:
 {input}
 
 Campaign History:
@@ -116,15 +133,15 @@ Campaign Entities Data:
 {entities}
 
 Dungeon Master:""",
-            "description": "Useful for when the Dungeon Master is done considering what the player said and looking up any information they need.",
+            "description": "Useful for when the Dungeon Master is done considering what the player said and looking up any information they need. The input to this tool should be what the player said, followed by the Dungeon Master's current notes.  The result of this tool should be the Dungeon Master's response to the player.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
+            "chain_type": LLMChain,
             "return_direct": True,
         },
         "Dungeon Master Considering": {
             "template": """As the Dungeon Master for this D&D 5e campaign, you should consider what should happen next.
 
-What should happen next after a player says the following?:
+I want to consider the following:
 {input}
 
 Campaign History:
@@ -135,14 +152,14 @@ Campaign Entities Data:
 {entities}
 
 Dungeon Master:""",
-            "description": "Useful for when the Dungeon Master is unsure of what to do next and needs to consider their options.",
+            "description": "Useful for when the Dungeon Master is unsure of what to do next and needs to consider their options. The input to this tool should be what the Dungeon Master is considering based on what the player said.  The result of this tool should be the Dungeon Master's thoughts on the topic.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
+            "chain_type": LLMChain,
         },
         "Campaign Start": {
             "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling.
 
-What should happen next after a player says the following?:
+What should I say to begin this campaign?:
 {input}
 
 Campaign History:
@@ -153,12 +170,13 @@ Campaign Entities Data:
 {entities}
 
 Dungeon Master:""",
-            "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting.",
+            "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting. The input to this tool should be a unique one sentence made up story description based on what the player just said. The output of this tool should be what the Dungeon Master says to start the campaign.",
             "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
+            "chain_type": LLMChain,
+            "return_direct": True,
         },
         "Dice Rolling Assistant": {
-            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice.",
+            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice. Make sure the rolls follow Dungeons and Dragons 5e rules.",
             "function": roll_dice_parser,
         },
         "Dungeons and Dragons Reference": {
@@ -195,8 +213,8 @@ def start():
     cl.user_session.set("llm", llm)
     cl.user_session.set("llmc", llmc)
     cl.user_session.set("search", search)
-
     memory = get_memory(llmc)
+    tools = get_tools(llmc, memory)
     tools = get_tools(llmc, memory)
     agent_chain = get_conversation_chain(llmc, memory, tools)
 
@@ -214,4 +232,8 @@ async def main(message: str):
         #reply = await cl.make_async(agent.run)(message, callbacks=[cb])
     elif cl.user_session.get("chain_type") == ConversationChain:
         reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
+    elif cl.user_session.get("chain_type") == LLMChain:
+        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
     print(f"Reply: {reply}")
+
+    await cl.Message(reply).send()
