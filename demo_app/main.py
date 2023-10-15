@@ -79,13 +79,13 @@ If you need inspiration, use the tools. You have access to the following tools:"
 Protagonist's Action:
 {input}
 
-Story History:
+Story History (Optional):
 {buffer}
 
-Story Entities Data:
+Story Entities Data (Optional):
 {entities}
 
-Game Scratchpad:"""
+Game Scratchpad (Optional):"""
 
     prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities"])
     llm_chain = ConversationChain(llm=llm, prompt=prompt, verbose=True, memory=CombinedMemory(memories=[ReadOnlySharedMemory(memory=memory[0]), memory[1]]))
