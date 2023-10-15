@@ -19,6 +19,7 @@ pysqlite3-binary = "^0.5.2"
 html2text = "^2020.1.16"
 tiktoken = "^0.5.1"
 numexpr = "^2.8.7"
+ipdb = "^0.13.13"
 
 [build-system]
 requires = ["poetry-core"]
