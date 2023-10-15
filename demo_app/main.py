@@ -51,70 +51,41 @@ def get_memory(llm):
         llm=llm,
         memory_key="buffer",
         max_tokens=1000,
-        ai_prefix="Dungeon Master",
-        human_prefix="Player Character",
+        ai_prefix="Game Master",
+        human_prefix="Protagonist",
         input_key="input",
     )
+
     memory_entity = ConversationKGMemory(
         llm=llm,
         memory_key="entities",
         input_key="input",
     )
 
-    #combined = CombinedMemory(memories=[memory_buffer, memory_entity])
-
     return [memory_buffer, memory_entity]
 
 def get_conversation_chain(llm, memory, tools):
+    prefix = """Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. Never tell me your dice rolls! I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master. For describing actions that happen in the game world, wrap your description in '*'.
+Do not change roles unless acting out a character besides the protagonist!
+Do not speak from the perspective of the protagonist.
+Do not forget to finish speaking by saying, 'It's your turn, what do you do next?'
+Do not add anything else
+Remember you are the storyteller and Game Master.
+Stop speaking the moment you finish speaking from your perspective as the Game Master.
 
-#    prompt = PromptTemplate(
-#        input_variables=["input", "buffer", "entities"],
-#        template="""As the Dungeon Master for this D&D 5e campaign, you should decide what to say next to the player.
-#
-#What should I say to the player?:
-#{input}
-#
-#Campaign History:
-#{buffer}
-#
-#Campaign Entities Data:
-#{entities}
-#"""
-#    )
-    #agent = initialize_agent(
-    #    llm=llm,
-    #    agent_type=AgentType.CHAT_CONVERSATIONAL_REACT_DESCRIPTION,
-    #    tools=tools,
-    #    memory=memory,
-    #    verbose=True,
-    #    max_iterations=10,
-    #    early_stopping_method="generate",
-    #    handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
-    #    prompt=prompt,
-    #    ai_prefix="Dungeon Master",
-    #    human_prefix="Player Character",
-    #    input_key="input",
-    #)
+If you need inspiration, use the tools. You have access to the following tools:"""
+    suffix = """As Game Master, you have taken the following notes about the game thus far. Use these notes to decide what happens next in the story.
 
-    #return agent
-
-
-    prefix = """As the Dungeon Master for this D&D 5e campaign, you should decide what you say to the player next after the player's message.  If you're not sure what to say next, use the tools. Your final reply to the player should only include the words the Dungeon Master speaks directly to the player, including any descriptions of what is happening in the campaign this turn.
-
-You have access to the following tools:"""
-    suffix = """You are a Dungeon Master considering what happens next after the player's message.
-
-Player's message:
+Protagonist's Action:
 {input}
 
-Campaign History:
+Story History:
 {buffer}
 
-Campaign Entities Data:
+Story Entities Data:
 {entities}
 
-Dungeon Master's Personal Notes:"""
-    # Dungeon Master Scratchpad: {agent_scratchpad}
+Game Scratchpad:"""
 
     prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities"])
     llm_chain = ConversationChain(llm=llm, prompt=prompt, verbose=True, memory=CombinedMemory(memories=[ReadOnlySharedMemory(memory=memory[0]), memory[1]]))
@@ -125,14 +96,14 @@ Dungeon Master's Personal Notes:"""
         tools=tools,
         verbose=True,
         memory=CombinedMemory(memories=memory),
-        handle_parsing_errors="As a Dungeon Master, I'll try a different way...",
+        handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
         early_stopping_method="generate",
     )
 
     return agent_chain
 
-def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master for a D&D 5e campaign, what do you say next?"):
+def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Game Master for a D&D 5e campaign, what do you say next?"):
 
     agent = LLMMathChain(
         llm=llm,
@@ -141,20 +112,20 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Dungeon Master f
         verbose=True,
         max_iterations=3,
         early_stopping_method="generate",
-        handle_parsing_errors="As a Dungeon Master, I'll put it a different way...",
+        handle_parsing_errors="As the Game Master, I'll put it a different way...",
         prompt=prompt,
-        ai_prefix="Dungeon Master",
-        human_prefix="Player Character",
+        ai_prefix="Game Master",
+        human_prefix="Protagonist",
     )
 
     return agent
 
 def get_tools(llm, memory):
     tools_data = {
-        "Dungeon Master Speaks": {
-            "template": """As the Dungeon Master for this D&D 5e one shot campaign, I should decide what to say next to the player. Only reply as a real Dungeon Master would, and don't ever break character.  Expand upon the draft if the player needs more information, and make sure you're not repeating yourself.
+        "Make up a new story": {
+            "template": """Makes up the first act of a new story. Incorporate the following information into the story:
 
-Dungeon Master's Draft Reply:
+Story Inspiration:
 {input}
 
 Campaign History:
@@ -163,62 +134,22 @@ Campaign History:
 Campaign Entities Data:
 {entities}
 
-Dungeon Master:""",
-            "description": "Useful for when the Dungeon Master is done considering what the player said and looking up any information they need. The input to this tool should be a draft of what the Dungeon Master's reply might be.  The result of this tool should be the Dungeon Master's final response to the player, including any descriptions of how the world changed this turn.",
+Storyteller:""",
+            "description": "Useful for when the Campaign History is empty. This tool will generate a new story for you to start the story. The input to this tool should be a summary of any information that should be included in the story. The result of this tool should be a summary of the first act of the generated story.",
             "input_variables": ["input", "buffer", "entities"],
             "chain_type": ConversationChain,
-            "return_direct": True,
-        },
-        "Dungeon Master Considering": {
-            "template": """As the Dungeon Master for this D&D 5e campaign, you should consider what should happen next.
-
-I want to consider the following:
-{input}
-
-Campaign History:
-{buffer}
-
-Campaign Entities Data:
-{entities}
-
-Dungeon Master:""",
-            "description": "Useful for when the Dungeon Master is unsure of what to do next and needs to consider their options. The input to this tool should be what the Dungeon Master is considering based on what the player said.  The result of this tool should be the Dungeon Master's thoughts on the topic.",
-            "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
-        },
-        "Campaign Start": {
-            "template": """A new D&D is about to begin. As the Dungeon Master for this D&D 5e campaign, you should get the ball rolling. Only reply as a real Dungeon Master would, and don't ever break character.
-
-What should I say to begin this campaign?:
-{input}
-
-Campaign History:
-{buffer}
-
-Campaign Entities Data:
-{entities}
-
-Dungeon Master:""",
-            "description": "Initiates the start of a new D&D campaign, setting the scene and introducing initial plot elements. Useful for when a new campaign or session is starting. The input to this tool should be a unique one sentence made up story description based on what the player just said. The output of this tool should be what the Dungeon Master says to start the campaign.",
-            "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
-            "return_direct": True,
+            "return_direct": False,
         },
         "Dice Rolling Assistant": {
-            "description": "An assistant that can roll any combination of dice. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice. Make sure the rolls follow Dungeons and Dragons 5e rules.",
+            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice.",
             "function": roll_dice_parser,
         },
-        "Dungeons and Dragons Reference": {
-            "description": "Searches the internet for information about Dungeons and Dragons.",
+        "Internet Search": {
+            "description": "Searches the internet for information, facts, or story ideas. Useful for finding inspiration for story elements. The input to this tool should be a search query. The result of this tool should be a summary of the search results. Be direct!",
             "function": cl.user_session.get("search").run,
         },
     }
     
-    # Remove "Dungeon Master Considering" tool for now
-    del tools_data["Dungeon Master Considering"]
-    del tools_data["Campaign Start"]
-    #del tools_data["Dungeon Master Speaks"]
-
     tools = []
     for tool_name, tool_info in tools_data.items():
         description = tool_info["description"]
@@ -260,13 +191,7 @@ async def main(message: str):
     agent = cl.user_session.get("agent")
     cb = cl.LangchainCallbackHandler(stream_final_answer=True)
     reply = None
-    if cl.user_session.get("chain_type") == LLMMathChain:
-        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
-        #reply = await cl.make_async(agent.run)(message, callbacks=[cb])
-    elif cl.user_session.get("chain_type") == ConversationChain:
-        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
-    elif cl.user_session.get("chain_type") == LLMChain:
-        reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
-    print(f"Reply: {reply}")
+    reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
 
+    print(f"Reply: {reply}")
     await cl.Message(reply).send()
