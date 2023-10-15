@@ -74,21 +74,20 @@ Remember you are the storyteller and Game Master.
 Stop speaking the moment you finish speaking from your perspective as the Game Master.
 
 If you need inspiration, use the tools. You have access to the following tools:"""
-    suffix = """As Game Master, you have taken the following notes about the game thus far. Use these notes to decide what happens next in the story.
+    suffix = """As Game Master, you have taken the following notes about the game thus far, including the sections: Protagonist's Message, Story History, Story Entities Data, and Game Scratchpad. Use these notes to decide what happens next in the story.
 
-Protagonist's Action:
+Protagonist's Message:
 {input}
 
-Story History (Optional):
-{buffer}
+Observation:{buffer}
 
-Story Entities Data (Optional):
-{entities}
+Observation:{entities}
 
-Game Scratchpad (Optional):"""
+Observation:"""
 
+    #import ipdb; ipdb.set_trace()
     prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, input_variables=["input", "buffer", "entities"])
-    llm_chain = ConversationChain(llm=llm, prompt=prompt, verbose=True, memory=CombinedMemory(memories=[ReadOnlySharedMemory(memory=memory[0]), memory[1]]))
+    llm_chain = LLMChain(llm=llm, prompt=prompt, verbose=True, memory=CombinedMemory(memories=memory))
 
     agent = ZeroShotAgent(llm_chain=llm_chain, tools=tools, verbose=True)
     agent_chain = AgentExecutor.from_agent_and_tools(
@@ -98,7 +97,7 @@ Game Scratchpad (Optional):"""
         memory=CombinedMemory(memories=memory),
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
-        early_stopping_method="generate",
+        #early_stopping_method="generate",
     )
 
     return agent_chain
@@ -149,6 +148,9 @@ Storyteller:""",
             "function": cl.user_session.get("search").run,
         },
     }
+
+    del tools_data["Make up a new story"]
+    del tools_data["Internet Search"]
     
     tools = []
     for tool_name, tool_info in tools_data.items():
@@ -194,4 +196,4 @@ async def main(message: str):
     reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
 
     print(f"Reply: {reply}")
-    await cl.Message(reply).send()
+    #await cl.Message(reply).send()
