@@ -1,11 +1,13 @@
 """Python file to serve as the frontend"""
 from langchain import OpenAI # LLMMathChain SerpAPIWrapper?
 from langchain.utilities import GoogleSearchAPIWrapper
-from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType
+from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType, OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate
+from langchain.prompts import PromptTemplate, ChatPromptTemplate
 from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory, ReadOnlySharedMemory
 from langchain.chains import LLMMathChain, LLMChain, ConversationChain
+from langchain.schema.messages import SystemMessage, HumanMessage
+from langchain.callbacks.base import BaseCallbackHandler
 import os
 import random
 import chainlit as cl
@@ -40,16 +42,27 @@ def roll_dice(x: int, y: int) -> int:
     return sum([random.randint(1, y) for _ in range(x)])
 
 def roll_dice_parser(input_str: str) -> str:
-    dice_nums = [int(x.strip()) for x in input_str.split(",")]
-    dice_rolls = [roll_dice(x, y) for x, y in zip(dice_nums[::2], dice_nums[1::2])]
-    total = sum(dice_rolls)
-    dice_description = [f"{x}d{y}" for x, y in zip(dice_nums[::2], dice_nums[1::2])]
-    return f"Rolling {', '.join(dice_description)}: {', '.join([str(x) for x in dice_rolls])}. Total: {total}"
+    #import ipdb; ipdb.set_trace()
+
+    words = input_str.split()
+    dice = []
+    for word in words:
+        # If word does not start with a number
+        if word[0].isdigit():
+            dice.append(word)
+
+    # Roll all dice
+    results = []
+    for die in dice:
+        x, y = die.split("d")
+        results.append(roll_dice(int(x), int(y)))
+
+    return sum(results)
 
 def get_memory(llm):
     memory_buffer = ConversationTokenBufferMemory(
         llm=llm,
-        memory_key="buffer",
+        memory_key="chat_history",
         max_tokens=1000,
         ai_prefix="Game Master",
         human_prefix="Protagonist",
@@ -72,7 +85,7 @@ Protagonist's Message (Game Master's Notes):
 {input}
 
 Story History (Game Master's Notes):
-{buffer}
+{chat_history}
 
 Story Entities (Game Master's Notes):
 {entities}
@@ -81,10 +94,6 @@ Game Master's Scratchpad (Game Master's Notes):
 {agent_scratchpad}
 
 You have access to the following tools:"""
-    suffix = """Begin!
-
-Question: {input}
-Thought:{agent_scratchpad}"""
     format_instructions = """Use the following format:
 
 Question: the input question you must answer
@@ -94,20 +103,49 @@ Action Input: the input to the action
 Observation: the result of the action
 ... (this Thought/Action/Action Input/Observation can repeat N times)
 Thought: I now know the final answer\nFinal Answer: the final answer to the original input question"""
-    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, format_instructions=format_instructions, input_variables=["input", "buffer", "entities", "agent_scratchpad"])
-    llm_chain = LLMChain(
-            llm=llm,
-            prompt=prompt,
-            verbose=True,
-            memory=ReadOnlySharedMemory(memory=memory),
-   )
+    suffix = """Begin!
 
-    agent = ZeroShotAgent(
-        llm_chain=llm_chain,
+Question: {input}
+Thought:{agent_scratchpad}"""
+
+    #prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, format_instructions=format_instructions, input_variables=["input", "chat_history", "entities", "agent_scratchpad"])
+
+    #llm_chain = LLMChain(
+    #        llm=llm,
+    #        prompt=prompt,
+    #        verbose=True,
+    #        memory=ReadOnlySharedMemory(memory=memory),
+    #)
+
+    #agent = ZeroShotAgent(
+    #    llm_chain=llm_chain,
+    #    tools=tools,
+    #    verbose=True,
+    #    ai_prefix="Game Master",
+    #    human_prefix="Protagonist",
+    #)
+
+    #prompt = OpenAIAgent.create_prompt(
+    #    tools,
+    #    #prefix=prefix,
+    #    #suffix=suffix,
+    #    #format_instructions=format_instructions,
+    #    input_variables=["input", "chat_history", "entities", "agent_scratchpad"]
+    #)
+
+    #import ipdb; ipdb.set_trace()
+
+    prompt = OpenAIMultiFunctionsAgent.create_prompt(
+        system_message=SystemMessage(content="You are an AI Game Master for a D&D 5e campaign, what do you say next?")
+    )
+
+    #import ipdb; ipdb.set_trace()
+
+    agent = OpenAIMultiFunctionsAgent(
+        llm=llm,
+        prompt=prompt,
         tools=tools,
         verbose=True,
-        ai_prefix="Game Master",
-        human_prefix="Protagonist",
     )
 
     agent_chain = AgentExecutor.from_agent_and_tools(
@@ -118,7 +156,10 @@ Thought: I now know the final answer\nFinal Answer: the final answer to the orig
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
         early_stopping_method="generate",
+        prompt=prompt,
     )
+
+    #import ipdb; ipdb.set_trace()
 
     return agent_chain
 
@@ -141,45 +182,16 @@ def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Game Master for 
 
 def get_tools(llm, memory):
     tools_data = {
-        "Dungeon Master Speaks": {
-            "template": """Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. Never tell me your dice rolls! I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master. For describing actions that happen in the game world, wrap each description word block in '*' characters.
-Do not change roles unless acting out a character besides the protagonist!
-Do not *ever* speak from the perspective of the protagonist!
-Do not forget to finish speaking by saying, 'It's your turn, what do you do next?'
-Do not add anything else
-Remember you are the storyteller and Game Master.
-Stop speaking the moment you finish speaking from your perspective as the Game Master.
-
-As Game Master, you have taken the following notes about the game thus far, including the sections: Dungeon Master's Thought, Story History, and Story Entities. Use these notes to decide what happens next in the story. Your reply should continue the Conversation History.
-
-Dungeon Master's Thought:
-{input}
-
-Story Entities:
-{entities}
-
-Conversation History:
-{buffer}
-
-Game Master:""",
-            "description": "Useful for when the Campaign History is empty. This tool will generate a new story for you to start the story. The input to this tool should be a robust summary of any information that should be included in the story. ",
-            "input_variables": ["input", "buffer", "entities"],
-            "chain_type": ConversationChain,
-            "return_direct": True,
-        },
-        "Dice Rolling Assistant": {
-            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice.",
+        "Dice_Rolling_Assistant": {
+            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the format XdY where X is the number of dice, and Y is the number of sides on each die rolled.",
             "function": roll_dice_parser,
         },
-        "Internet Search": {
-            "description": "Searches the internet for information, facts, or story ideas. Useful for finding inspiration for story elements. The input to this tool should be a search query. The result of this tool should be a summary of the search results. Be direct!",
+        "Internet_Search": {
+            "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
             "function": cl.user_session.get("search").run,
         },
     }
 
-    #del tools_data["Make up a new story"]
-    #del tools_data["Internet Search"]
-    
     tools = []
     for tool_name, tool_info in tools_data.items():
         description = tool_info["description"]
@@ -216,12 +228,29 @@ def start():
     cl.user_session.set("memory", memory)
     cl.user_session.set("tools", tools)
 
+
+class StreamHandler(BaseCallbackHandler):
+    def __init__(self):
+        self.msg = cl.Message(content="")
+
+    async def on_llm_new_token(self, token: str, **kwargs):
+        await self.msg.stream_token(token)
+
+    async def on_llm_end(self, response: str, **kwargs):
+        await self.msg.send()
+        self.msg = cl.Message(content="")
+
 @cl.on_message
 async def main(message: str):
     agent = cl.user_session.get("agent")
-    cb = cl.LangchainCallbackHandler(stream_final_answer=True)
-    reply = None
-    reply = await cl.make_async(agent.run)({"input": message}, callbacks=[cb])
+    cb = cl.AsyncLangchainCallbackHandler(stream_final_answer=True)
+    await agent.arun(
+        {
+            "input": message
+        },
+        callbacks=[
+            cl.AsyncLangchainCallbackHandler(stream_final_answer=True),
+            StreamHandler()
+        ]
+    )
 
-    print(f"Reply: {reply}")
-    await cl.Message(reply).send()
