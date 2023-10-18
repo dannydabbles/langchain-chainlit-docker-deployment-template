@@ -33,7 +33,7 @@ def create_chain(chain_type, llm, input_variables, template_str, memory):
         llm=llm,
         prompt=prompt,
         verbose=True,
-        memory=memory,
+        memory=ReadOnlySharedMemory(memory=memory),
     )
 
 def roll_dice(x: int, y: int) -> int:
@@ -46,9 +46,9 @@ def roll_dice_parser(input_str: str) -> str:
     dice_description = [f"{x}d{y}" for x, y in zip(dice_nums[::2], dice_nums[1::2])]
     return f"Rolling {', '.join(dice_description)}: {', '.join([str(x) for x in dice_rolls])}. Total: {total}"
 
-def get_memory(llm, llmc):
+def get_memory(llm):
     memory_buffer = ConversationTokenBufferMemory(
-        llm=llmc,
+        llm=llm,
         memory_key="buffer",
         max_tokens=1000,
         ai_prefix="Game Master",
@@ -64,39 +64,69 @@ def get_memory(llm, llmc):
 
     return CombinedMemory(memories=[memory_buffer, memory_entity])
 
-def get_conversation_chain(llm, memory):
-    agent = create_chain(
-        chain_type=ConversationChain,
-        llm=llm,
-        input_variables=["input", "buffer", "entities"],
-        template_str="""Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. Never tell me your dice rolls! I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master. For describing actions that happen in the game world, wrap each description word block in '*' characters.
-Do not change roles unless acting out a character besides the protagonist!
-Do not *ever* speak from the perspective of the protagonist!
-Do not forget to finish speaking by saying, 'It's your turn, what do you do next?'
-Do not add anything else
-Remember you are the storyteller and Game Master.
-Stop speaking the moment you finish speaking from your perspective as the Game Master.
+def get_conversation_chain(llm, memory, tools):
+    #import ipdb; ipdb.set_trace()
+    prefix = """Decide what to do next as Game Mater of this story, based on the following current story information:
 
-As Game Master, you have taken the following notes about the game thus far, including the sections: Player's Message, Story History, and Story Entities. Use these notes to decide what happens next in the story. Your reply should continue the Conversation History.
+Protagonist's Message (Game Master's Notes):
+{input}
 
-Story Entities:
-{entities}
-
-Conversation History:
+Story History (Game Master's Notes):
 {buffer}
 
+Story Entities (Game Master's Notes):
+{entities}
 
-Protagonist: {input}
-Game Master:""",
-        memory=memory,
+Game Master's Scratchpad (Game Master's Notes):
+{agent_scratchpad}
+
+You have access to the following tools:"""
+    suffix = """Begin!
+
+Question: {input}
+Thought:{agent_scratchpad}"""
+    format_instructions = """Use the following format:
+
+Question: the input question you must answer
+Thought: you should always think about what to do
+Action: the action to take, should be one of [{tool_names}]
+Action Input: the input to the action
+Observation: the result of the action
+... (this Thought/Action/Action Input/Observation can repeat N times)
+Thought: I now know the final answer\nFinal Answer: the final answer to the original input question"""
+    prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, format_instructions=format_instructions, input_variables=["input", "buffer", "entities", "agent_scratchpad"])
+    llm_chain = LLMChain(
+            llm=llm,
+            prompt=prompt,
+            verbose=True,
+            memory=ReadOnlySharedMemory(memory=memory),
+   )
+
+    agent = ZeroShotAgent(
+        llm_chain=llm_chain,
+        tools=tools,
+        verbose=True,
+        ai_prefix="Game Master",
+        human_prefix="Protagonist",
     )
 
-    return agent
+    agent_chain = AgentExecutor.from_agent_and_tools(
+        agent=agent,
+        tools=tools,
+        verbose=True,
+        memory=memory,
+        handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
+        max_iterations=3,
+        early_stopping_method="generate",
+    )
 
-def get_llmmath_chain(llm, memory, prompt="You are an AI Game Master for a D&D 5e campaign, what do you say next?"):
+    return agent_chain
+
+def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Game Master for a D&D 5e campaign, what do you say next?"):
 
     agent = LLMMathChain(
         llm=llm,
+        tools=tools,
         memory=memory,
         verbose=True,
         max_iterations=3,
@@ -109,6 +139,66 @@ def get_llmmath_chain(llm, memory, prompt="You are an AI Game Master for a D&D 5
 
     return agent
 
+def get_tools(llm, memory):
+    tools_data = {
+        "Dungeon Master Speaks": {
+            "template": """Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. Never tell me your dice rolls! I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master. For describing actions that happen in the game world, wrap each description word block in '*' characters.
+Do not change roles unless acting out a character besides the protagonist!
+Do not *ever* speak from the perspective of the protagonist!
+Do not forget to finish speaking by saying, 'It's your turn, what do you do next?'
+Do not add anything else
+Remember you are the storyteller and Game Master.
+Stop speaking the moment you finish speaking from your perspective as the Game Master.
+
+As Game Master, you have taken the following notes about the game thus far, including the sections: Dungeon Master's Thought, Story History, and Story Entities. Use these notes to decide what happens next in the story. Your reply should continue the Conversation History.
+
+Dungeon Master's Thought:
+{input}
+
+Story Entities:
+{entities}
+
+Conversation History:
+{buffer}
+
+Game Master:""",
+            "description": "Useful for when the Campaign History is empty. This tool will generate a new story for you to start the story. The input to this tool should be a robust summary of any information that should be included in the story. ",
+            "input_variables": ["input", "buffer", "entities"],
+            "chain_type": ConversationChain,
+            "return_direct": True,
+        },
+        "Dice Rolling Assistant": {
+            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should be a comma separated list of numbers, each pair representing the number of dice followed by the number or sides on each die. For example, '1, 6, 10, 4' would be the input if you wanted to roll 1d6 and 10d4 dice.",
+            "function": roll_dice_parser,
+        },
+        "Internet Search": {
+            "description": "Searches the internet for information, facts, or story ideas. Useful for finding inspiration for story elements. The input to this tool should be a search query. The result of this tool should be a summary of the search results. Be direct!",
+            "function": cl.user_session.get("search").run,
+        },
+    }
+
+    #del tools_data["Make up a new story"]
+    #del tools_data["Internet Search"]
+    
+    tools = []
+    for tool_name, tool_info in tools_data.items():
+        description = tool_info["description"]
+
+        if 'function' in tool_info:
+            func = tool_info['function']
+            tool = Tool(name=tool_name, func=func, description=description)
+        else:
+            template_str = tool_info.get("template", None)
+            input_variables = tool_info["input_variables"]
+            chain_type = tool_info["chain_type"]
+            return_direct = tool_info.get("return_direct", False)
+            cl.user_session.set("chain_type", chain_type)
+            chain = create_chain(chain_type, llm, input_variables, template_str, memory)
+            tool = Tool(name=tool_name, func=chain.run, description=description, return_direct=return_direct)
+        tools.append(tool)
+
+    return tools
+
 @cl.on_chat_start
 def start():
     llm = OpenAI(temperature=0, streaming=True)
@@ -118,11 +208,13 @@ def start():
     cl.user_session.set("llm", llm)
     cl.user_session.set("llmc", llmc)
     cl.user_session.set("search", search)
-    memory = get_memory(llm, llmc)
-    agent_chain = get_conversation_chain(llmc, memory)
+    memory = get_memory(llmc)
+    tools = get_tools(llmc, memory)
+    agent_chain = get_conversation_chain(llmc, memory, tools)
 
     cl.user_session.set("agent", agent_chain)
     cl.user_session.set("memory", memory)
+    cl.user_session.set("tools", tools)
 
 @cl.on_message
 async def main(message: str):
