@@ -3,7 +3,7 @@ from langchain import OpenAI # LLMMathChain SerpAPIWrapper?
 from langchain.utilities import GoogleSearchAPIWrapper
 from langchain.agents import initialize_agent, ZeroShotAgent, Tool, AgentExecutor, AgentType, OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
-from langchain.prompts import PromptTemplate, ChatPromptTemplate
+from langchain.prompts import PromptTemplate, ChatPromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationTokenBufferMemory, ConversationKGMemory, CombinedMemory, ReadOnlySharedMemory
 from langchain.chains import LLMMathChain, LLMChain, ConversationChain
 from langchain.schema.messages import SystemMessage, HumanMessage
@@ -15,7 +15,6 @@ from langchain import hub
 
 
 def create_chain(chain_type, llm, input_variables, template_str, memory):
-
     if template_str:
         prompt = PromptTemplate(
             input_variables=input_variables,
@@ -42,8 +41,6 @@ def roll_dice(x: int, y: int) -> int:
     return sum([random.randint(1, y) for _ in range(x)])
 
 def roll_dice_parser(input_str: str) -> str:
-    #import ipdb; ipdb.set_trace()
-
     words = input_str.split()
     dice = []
     for word in words:
@@ -78,7 +75,6 @@ def get_memory(llm):
     return CombinedMemory(memories=[memory_buffer, memory_entity])
 
 def get_conversation_chain(llm, memory, tools):
-    #import ipdb; ipdb.set_trace()
     prefix = """Decide what to do next as Game Mater of this story, based on the following current story information:
 
 Protagonist's Message (Game Master's Notes):
@@ -108,44 +104,19 @@ Thought: I now know the final answer\nFinal Answer: the final answer to the orig
 Question: {input}
 Thought:{agent_scratchpad}"""
 
-    #prompt = ZeroShotAgent.create_prompt(tools, prefix=prefix, suffix=suffix, format_instructions=format_instructions, input_variables=["input", "chat_history", "entities", "agent_scratchpad"])
-
-    #llm_chain = LLMChain(
-    #        llm=llm,
-    #        prompt=prompt,
-    #        verbose=True,
-    #        memory=ReadOnlySharedMemory(memory=memory),
-    #)
-
-    #agent = ZeroShotAgent(
-    #    llm_chain=llm_chain,
-    #    tools=tools,
-    #    verbose=True,
-    #    ai_prefix="Game Master",
-    #    human_prefix="Protagonist",
-    #)
-
-    #prompt = OpenAIAgent.create_prompt(
-    #    tools,
-    #    #prefix=prefix,
-    #    #suffix=suffix,
-    #    #format_instructions=format_instructions,
-    #    input_variables=["input", "chat_history", "entities", "agent_scratchpad"]
-    #)
-
-    #import ipdb; ipdb.set_trace()
-
     prompt = OpenAIMultiFunctionsAgent.create_prompt(
-        system_message=SystemMessage(content="You are an AI Game Master for a D&D 5e campaign, what do you say next?")
+        system_message=SystemMessage(content="You are an AI Game Master for a D&D 5e campaign, what do you say next?"),
+        #extra_prompt_messages=[
+        #    MessagesPlaceholder(variable_name="chat_history"),
+        #],
     )
-
-    #import ipdb; ipdb.set_trace()
 
     agent = OpenAIMultiFunctionsAgent(
         llm=llm,
         prompt=prompt,
         tools=tools,
         verbose=True,
+        memory=memory,
     )
 
     agent_chain = AgentExecutor.from_agent_and_tools(
@@ -244,13 +215,17 @@ class StreamHandler(BaseCallbackHandler):
 async def main(message: str):
     agent = cl.user_session.get("agent")
     cb = cl.AsyncLangchainCallbackHandler(stream_final_answer=True)
-    await agent.arun(
+    # import ipdb; ipdb.set_trace()
+    reply = await agent.acall(
         {
-            "input": message
+            "input": message,
+            "chat_history": "",
         },
         callbacks=[
             cl.AsyncLangchainCallbackHandler(stream_final_answer=True),
             StreamHandler()
         ]
     )
+
+    print(f"Reply: {reply}")
 
