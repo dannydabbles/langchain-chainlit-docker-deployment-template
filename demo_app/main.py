@@ -139,8 +139,6 @@ def start():
 
     llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo-16k")
 
-    cl.user_session.set("llmc", llmc)
-
     memory = get_memory(llmc)
     tools = get_tools(llmc, memory)
     agent_chain = get_conversation_chain(llmc, memory, tools)
