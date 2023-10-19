@@ -64,62 +64,35 @@ def get_memory(llm):
         ai_prefix="Game Master",
         human_prefix="Protagonist",
         input_key="input",
+        return_messages=True,
     )
 
     memory_entity = ConversationKGMemory(
         llm=llm,
         memory_key="entities",
         input_key="input",
+        return_messages=True,
     )
 
     return CombinedMemory(memories=[memory_buffer, memory_entity])
 
 def get_conversation_chain(llm, memory, tools):
-    prefix = """Decide what to do next as Game Mater of this story, based on the following current story information:
-
-Protagonist's Message (Game Master's Notes):
-{input}
-
-Story History (Game Master's Notes):
-{chat_history}
-
-Story Entities (Game Master's Notes):
-{entities}
-
-Game Master's Scratchpad (Game Master's Notes):
-{agent_scratchpad}
-
-You have access to the following tools:"""
-    format_instructions = """Use the following format:
-
-Question: the input question you must answer
-Thought: you should always think about what to do
-Action: the action to take, should be one of [{tool_names}]
-Action Input: the input to the action
-Observation: the result of the action
-... (this Thought/Action/Action Input/Observation can repeat N times)
-Thought: I now know the final answer\nFinal Answer: the final answer to the original input question"""
-    suffix = """Begin!
-
-Question: {input}
-Thought:{agent_scratchpad}"""
-
     prompt = OpenAIMultiFunctionsAgent.create_prompt(
         system_message=SystemMessage(content="You are an AI Game Master for a D&D 5e campaign, what do you say next?"),
-        #extra_prompt_messages=[
-        #    MessagesPlaceholder(variable_name="chat_history"),
-        #],
+        extra_prompt_messages=[
+            MessagesPlaceholder(variable_name="chat_history"),
+            MessagesPlaceholder(variable_name="entities"),
+        ],
     )
 
     agent = OpenAIMultiFunctionsAgent(
         llm=llm,
-        prompt=prompt,
         tools=tools,
+        prompt=prompt,
         verbose=True,
-        memory=memory,
     )
 
-    agent_chain = AgentExecutor.from_agent_and_tools(
+    agent_chain = AgentExecutor(
         agent=agent,
         tools=tools,
         verbose=True,
@@ -127,10 +100,9 @@ Thought:{agent_scratchpad}"""
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
         early_stopping_method="generate",
-        prompt=prompt,
     )
 
-    #import ipdb; ipdb.set_trace()
+    import ipdb; ipdb.set_trace()
 
     return agent_chain
 
@@ -219,7 +191,6 @@ async def main(message: str):
     reply = await agent.acall(
         {
             "input": message,
-            "chat_history": "",
         },
         callbacks=[
             cl.AsyncLangchainCallbackHandler(stream_final_answer=True),
