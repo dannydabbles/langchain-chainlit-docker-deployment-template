@@ -37,25 +37,6 @@ def create_chain(chain_type, llm, input_variables, template_str, memory):
         memory=ReadOnlySharedMemory(memory=memory),
     )
 
-def roll_dice(x: int, y: int) -> int:
-    return sum([random.randint(1, y) for _ in range(x)])
-
-def roll_dice_parser(input_str: str) -> str:
-    words = input_str.split()
-    dice = []
-    for word in words:
-        # If word does not start with a number
-        if word[0].isdigit():
-            dice.append(word)
-
-    # Roll all dice
-    results = []
-    for die in dice:
-        x, y = die.split("d")
-        results.append(roll_dice(int(x), int(y)))
-
-    return sum(results)
-
 def get_memory(llm):
     memory_buffer = ConversationTokenBufferMemory(
         llm=llm,
@@ -78,7 +59,13 @@ def get_memory(llm):
 
 def get_conversation_chain(llm, memory, tools):
     prompt = OpenAIMultiFunctionsAgent.create_prompt(
-        system_message=SystemMessage(content="You are an AI Game Master for a D&D 5e campaign, what do you say next?"),
+        system_message=SystemMessage(content="""Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. Never tell me your dice rolls! I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master. For describing actions that happen in the game world, wrap each description word block in '*' characters. The success of my actions should be determined by a dice roll where appropriate by D&D 5e rules!
+Do not change roles unless acting out a character besides the protagonist!
+Do not *ever* speak from the perspective of the protagonist!
+Do not forget to finish speaking by saying, 'It's your turn, what do you do next?'
+Do not add anything else
+Remember you are the storyteller and Game Master.
+Stop speaking the moment you finish speaking from your perspective as the Game Master."""),
         extra_prompt_messages=[
             MessagesPlaceholder(variable_name="chat_history"),
             MessagesPlaceholder(variable_name="entities"),
@@ -99,26 +86,14 @@ def get_conversation_chain(llm, memory, tools):
         memory=memory,
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
-        early_stopping_method="generate",
     )
-
-    import ipdb; ipdb.set_trace()
 
     return agent_chain
 
-def get_llmmath_chain(llm, memory, tools, prompt="You are an AI Game Master for a D&D 5e campaign, what do you say next?"):
-
-    agent = LLMMathChain(
+def get_llmmath_chain(llm):
+    agent = LLMMathChain.from_llm(
         llm=llm,
-        tools=tools,
-        memory=memory,
         verbose=True,
-        max_iterations=3,
-        early_stopping_method="generate",
-        handle_parsing_errors="As the Game Master, I'll put it a different way...",
-        prompt=prompt,
-        ai_prefix="Game Master",
-        human_prefix="Protagonist",
     )
 
     return agent
@@ -127,7 +102,7 @@ def get_tools(llm, memory):
     tools_data = {
         "Dice_Rolling_Assistant": {
             "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the format XdY where X is the number of dice, and Y is the number of sides on each die rolled.",
-            "function": roll_dice_parser,
+            "coroutine": get_llmmath_chain(llm).arun,
         },
         "Internet_Search": {
             "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
@@ -142,6 +117,9 @@ def get_tools(llm, memory):
         if 'function' in tool_info:
             func = tool_info['function']
             tool = Tool(name=tool_name, func=func, description=description)
+        elif 'coroutine' in tool_info:
+            coroutine = tool_info['coroutine']
+            tool = Tool(name=tool_name, func=None, coroutine=coroutine, description=description)
         else:
             template_str = tool_info.get("template", None)
             input_variables = tool_info["input_variables"]
