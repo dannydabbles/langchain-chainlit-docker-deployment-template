@@ -86,6 +86,7 @@ Stop speaking the moment you finish speaking from your perspective as the Game M
         memory=memory,
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
         max_iterations=3,
+        tags=["conversation"],
     )
 
     return agent_chain
@@ -98,11 +99,30 @@ def get_llmmath_chain(llm):
 
     return agent
 
+def roll_dice(x: int, y: int) -> int:
+    return sum([random.randint(1, y) for _ in range(x)])
+
+def roll_dice_parser(input_str: str) -> str:
+    words = input_str.split()
+    dice = []
+    for word in words:
+        # If word does not start with a number
+        if word[0].isdigit():
+            dice.append(word)
+
+    # Roll all dice
+    results = []
+    for die in dice:
+        x, y = die.split("d")
+        results.append(roll_dice(int(x), int(y)))
+
+    return sum(results)
+
 def get_tools(llm, memory):
     tools_data = {
         "Dice_Rolling_Assistant": {
-            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the format XdY where X is the number of dice, and Y is the number of sides on each die rolled.",
-            "coroutine": get_llmmath_chain(llm).arun,
+            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the exact format XdY where X is the number of dice, and Y is the number of sides on each die rolled (e.g. 4d20, or 1d6).",
+            "function": roll_dice_parser,
         },
         "Internet_Search": {
             "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
@@ -155,6 +175,8 @@ class StreamHandler(BaseCallbackHandler):
         self.msg = cl.Message(content="")
 
     async def on_llm_new_token(self, token: str, **kwargs):
+        if not token:
+            return
         await self.msg.stream_token(token)
 
     async def on_llm_end(self, response: str, **kwargs):
