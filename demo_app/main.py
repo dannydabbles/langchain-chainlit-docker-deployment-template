@@ -11,30 +11,43 @@ import random
 import chainlit as cl
 
 
-def create_chain(chain_type, llm, input_variables, template_str, memory):
-    """Create a chain of agents"""
+def roll_dice(x: int, y: int) -> int:
+    """Roll x dice with y sides each"""
 
-    if template_str:
-        prompt = PromptTemplate(
-            input_variables=input_variables,
-            template=template_str,
-        )
+    result = sum([random.randint(1, y) for _ in range(x)])
 
-    if chain_type == LLMMathChain:
-        return chain_type(
-            llm=llm,
-            prompt=prompt,
-            verbose=True,
-            memory=memory,
-            input_key="input",
-        )
+    cl.Message(content=f"Rolled {x}d{y} and got {result}.").send()
 
-    return chain_type(
-        llm=llm,
-        prompt=prompt,
-        verbose=True,
-        memory=ReadOnlySharedMemory(memory=memory),
-)
+    return result
+
+def roll_dice_parser(input_str: str) -> str:
+    """Parse a string for dice rolls"""
+
+    words = input_str.split()
+    dice = []
+    for word in words:
+        # If word does not start with a number
+        if word[0].isdigit():
+            dice.append(word)
+
+    # Roll all dice
+    results = []
+    max_result = 0
+    if not dice:
+        x, y = 1, 20
+        results.append(roll_dice(int(x), int(y)))
+        max_result += int(x) * int(y)
+    for die in dice:
+        try:
+            x, y = die.split("d")
+        except ValueError:
+            x, y = 1, 20
+        results.append(roll_dice(int(x), int(y)))
+        max_result += int(x) * int(y)
+
+    result = sum(results)
+
+    return f"Rolled {result} out of a possible {max_result}."
 
 def get_memory(llm):
     """Create a memory buffer for the conversation"""
@@ -50,6 +63,37 @@ def get_memory(llm):
     )
 
     return memory_buffer
+
+def get_tools(llm, memory):
+    """Create a list of tools"""
+
+    tools_data = {
+        "Dice_Rolling_Assistant": {
+            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the exact format XdY where X is the number of dice, and Y is the number of sides on each die rolled (e.g. 4d20, or 1d6).",
+            "function": roll_dice_parser,
+        },
+        "Internet_Search": {
+            "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
+            "coroutine": DuckDuckGoSearchRun().arun,
+        },
+    }
+
+    tools = []
+    for tool_name, tool_info in tools_data.items():
+        description = tool_info["description"]
+
+        if 'function' in tool_info:
+            func = tool_info['function']
+            tool = Tool(name=tool_name, func=func, coroutine=None, description=description)
+        elif 'coroutine' in tool_info:
+            coroutine = tool_info['coroutine']
+            tool = Tool(name=tool_name, func=None, coroutine=coroutine, description=description)
+        else:
+            raise ValueError("Tool must have a function or coroutine")
+
+        tools.append(tool)
+
+    return tools
 
 def get_conversation_chain(llm, memory, tools):
     """Create a chain of agents for the conversation"""
@@ -80,79 +124,10 @@ Stop speaking the moment you finish speaking from your perspective as the Game M
         verbose=True,
         memory=memory,
         handle_parsing_errors="As a Storyteller, that doesn't quite make sense.  What else can I try?",
-        max_iterations=3,
+        max_iterations=5,
     )
 
     return agent_chain
-
-def get_llmmath_chain(llm):
-    """Create a chain of agents for the LLMMath tool"""
-
-    agent = LLMMathChain.from_llm(
-        llm=llm,
-        verbose=True,
-    )
-
-    return agent
-
-def roll_dice(x: int, y: int) -> int:
-    """Roll x dice with y sides each"""
-
-    return sum([random.randint(1, y) for _ in range(x)])
-
-def roll_dice_parser(input_str: str) -> str:
-    """Parse a string for dice rolls"""
-
-    words = input_str.split()
-    dice = []
-    for word in words:
-        # If word does not start with a number
-        if word[0].isdigit():
-            dice.append(word)
-
-    # Roll all dice
-    results = []
-    for die in dice:
-        x, y = die.split("d")
-        results.append(roll_dice(int(x), int(y)))
-
-    return sum(results)
-
-def get_tools(llm, memory):
-    """Create a list of tools"""
-
-    tools_data = {
-        "Dice_Rolling_Assistant": {
-            "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the exact format XdY where X is the number of dice, and Y is the number of sides on each die rolled (e.g. 4d20, or 1d6).",
-            "function": roll_dice_parser,
-        },
-        "Internet_Search": {
-            "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
-            "function": cl.user_session.get("search").run,
-        },
-    }
-
-    tools = []
-    for tool_name, tool_info in tools_data.items():
-        description = tool_info["description"]
-
-        if 'function' in tool_info:
-            func = tool_info['function']
-            tool = Tool(name=tool_name, func=func, description=description)
-        elif 'coroutine' in tool_info:
-            coroutine = tool_info['coroutine']
-            tool = Tool(name=tool_name, func=None, coroutine=coroutine, description=description)
-        else:
-            template_str = tool_info.get("template", None)
-            input_variables = tool_info["input_variables"]
-            chain_type = tool_info["chain_type"]
-            return_direct = tool_info.get("return_direct", False)
-            cl.user_session.set("chain_type", chain_type)
-            chain = create_chain(chain_type, llm, input_variables, template_str, memory)
-            tool = Tool(name=tool_name, func=chain.run, description=description, return_direct=return_direct)
-        tools.append(tool)
-
-    return tools
 
 @cl.on_chat_start
 def start():
@@ -160,16 +135,15 @@ def start():
 
     llm = OpenAI(temperature=0, streaming=True)
     llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo-16k")
-    search = DuckDuckGoSearchRun()
 
     cl.user_session.set("llm", llm)
     cl.user_session.set("llmc", llmc)
-    cl.user_session.set("search", search)
+
     memory = get_memory(llmc)
     tools = get_tools(llmc, memory)
     agent_chain = get_conversation_chain(llmc, memory, tools)
 
-    cl.user_session.set("agent", agent_chain)
+    cl.user_session.set("agent_chain", agent_chain)
     cl.user_session.set("memory", memory)
     cl.user_session.set("tools", tools)
 
@@ -191,10 +165,11 @@ class StreamHandler(BaseCallbackHandler):
 async def main(message: str):
     """Main function"""
 
-    agent = cl.user_session.get("agent")
-    cb = cl.AsyncLangchainCallbackHandler(stream_final_answer=True)
-    #import ipdb; ipdb.set_trace()
-    reply = await agent.acall(
+    # Get the agent chain
+    agent_chain = cl.user_session.get("agent_chain")
+
+    # Call the agent chain
+    reply = await agent_chain.acall(
         {
             "input": message,
         },
@@ -204,6 +179,7 @@ async def main(message: str):
         ]
     )
     print(f"Reply: {reply}")
-    
-    agent.memory.prune()
+
+    # Prune memory
+    agent_chain.memory.prune()
 
