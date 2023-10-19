@@ -1,5 +1,4 @@
 """Python file to serve as the frontend"""
-from langchain import OpenAI
 from langchain.agents import Tool, AgentExecutor, OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
 from langchain.prompts import PromptTemplate, MessagesPlaceholder
@@ -11,16 +10,16 @@ import random
 import chainlit as cl
 
 
-def roll_dice(x: int, y: int) -> int:
+async def roll_dice(x: int, y: int) -> int:
     """Roll x dice with y sides each"""
 
     result = sum([random.randint(1, y) for _ in range(x)])
 
-    cl.Message(content=f"Rolled {x}d{y} and got {result}.").send()
+    await cl.Message(content=f"Rolled {x}d{y} and got {result}.").send()
 
     return result
 
-def roll_dice_parser(input_str: str) -> str:
+async def roll_dice_parser(input_str: str) -> str:
     """Parse a string for dice rolls"""
 
     words = input_str.split()
@@ -42,12 +41,16 @@ def roll_dice_parser(input_str: str) -> str:
             x, y = die.split("d")
         except ValueError:
             x, y = 1, 20
-        results.append(roll_dice(int(x), int(y)))
+        results.append(await roll_dice(int(x), int(y)))
         max_result += int(x) * int(y)
 
     result = sum(results)
 
-    return f"Rolled {result} out of a possible {max_result}."
+    message = f"Rolled {result} out of a possible {max_result}."
+
+    await cl.Message(content=message).send()
+
+    return message
 
 def get_memory(llm):
     """Create a memory buffer for the conversation"""
@@ -70,7 +73,7 @@ def get_tools(llm, memory):
     tools_data = {
         "Dice_Rolling_Assistant": {
             "description": "An assistant that can roll any combination of dice. Useful for adding unpredictability and uniqueness to story elements. Dice roll results represent the positive (high) or negative (low) outcomes of events against a predetermined difficulty value. The input to this tool should follow the exact format XdY where X is the number of dice, and Y is the number of sides on each die rolled (e.g. 4d20, or 1d6).",
-            "function": roll_dice_parser,
+            "coroutine": roll_dice_parser,
         },
         "Internet_Search": {
             "description": "Useful for looking up unknown information about D&D 5e rules, lore, and other fine details. The input to this tool should be a google search query. Ask targeted questions! The result of this tool should be a summary of the search results.",
@@ -116,6 +119,7 @@ Stop speaking the moment you finish speaking from your perspective as the Game M
         prompt=prompt,
         memory=memory,
         verbose=True,
+        max_execution_time=60,
     )
 
     agent_chain = AgentExecutor(
@@ -133,10 +137,8 @@ Stop speaking the moment you finish speaking from your perspective as the Game M
 def start():
     """Start the conversation"""
 
-    llm = OpenAI(temperature=0, streaming=True)
     llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo-16k")
 
-    cl.user_session.set("llm", llm)
     cl.user_session.set("llmc", llmc)
 
     memory = get_memory(llmc)
