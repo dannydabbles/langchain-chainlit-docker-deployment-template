@@ -17,6 +17,7 @@ cache = false
 [features]
 # Show the prompt playground
 prompt_playground = true
+multi_modal = false
 
 [UI]
 # Name of the app and chatbot.
