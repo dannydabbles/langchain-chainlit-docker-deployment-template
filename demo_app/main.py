@@ -1,7 +1,7 @@
 """Python file to serve as the frontend"""
 from langchain.agents import Tool, AgentExecutor, OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
-from langchain.chains import ConversationChain
+from langchain.chains import LLMChain
 from langchain.prompts import PromptTemplate, MessagesPlaceholder
 from langchain.memory import ConversationSummaryBufferMemory, ReadOnlySharedMemory
 from langchain.tools import DuckDuckGoSearchRun
@@ -12,6 +12,9 @@ import random
 import aiofiles
 import chainlit as cl
 
+
+HUMAN_PREFIX = "Protagonist"
+AI_PREFIX = "Game Master"
 
 async def roll_dice(x: int, y: int) -> int:
     """Roll x dice with y sides each"""
@@ -62,8 +65,8 @@ def get_memory(llm):
         llm=llm,
         memory_key="chat_history",
         max_token_limit=12000,
-        ai_prefix="Game Master",
-        human_prefix="Protagonist",
+        ai_prefix=AI_PREFIX,
+        human_prefix=HUMAN_PREFIX,
         input_key="input",
         return_messages=True,
     )
@@ -151,24 +154,37 @@ def start():
     cl.user_session.set("tools", tools)
     cl.user_session.set("llmc", llmc)
 
-def generate_dalle_image(llm, info, memory):
-    """Generate an image with DALL-E for the given text based on the conversation history thus far"""
+def get_dalle_template(memory) -> PromptTemplate:
+    """Create a template for DALL-E prompts"""
 
-    # Make the prompt for the ConversationChain
-    template = """Compose a DALL-E prompt that will generate a single storyboard frame for the following protagonist text.  Use the conversation history as context to help generate the prompt.
+    chat_history = ""
+    for engram in memory.chat_memory.messages:
+        if engram.type == "human":
+            chat_history += f"{HUMAN_PREFIX}: {engram.content}\n"
+        elif engram.type == "ai":
+            chat_history += f"{AI_PREFIX}: {engram.content}\n"
 
-Protagonist: {input}
-
-Conversation History:
+    template_start = "{input}\n\n"
+    template_history = f"""Conversation History:
 {chat_history}
 """
+    template = template_start + template_history
+
     prompt = PromptTemplate(
         template=template,
-        input_variables=["input", "chat_history"],
+        input_variables=[],
     )
 
-    # Make a ConversationChain to write a prompt for DALL-E based on the text
-    dalle_chain = ConversationChain(
+    return prompt
+
+def generate_dalle_image(llm, memory):
+    """Generate an image with DALL-E for the given text based on the conversation history thus far"""
+
+    # Make the prompt for DALL-E
+    prompt = get_dalle_template(memory)
+
+    # Make a LLMChain to write a prompt for DALL-E based on the text
+    dalle_chain = LLMChain(
         llm=llm,
         prompt=prompt,
         memory=ReadOnlySharedMemory(memory=memory),
@@ -176,9 +192,10 @@ Conversation History:
     )
 
     # Run the LLM chain
-    dalle_prompt = dalle_chain.run(input=info["input"])
+    dalle_prompt_input = """Compose a DALL-E prompt based on the conversation history thus far. The resulting image should be cinematic and represent the current state of the story. Include as much detail as DALL-E can handle, but be concise."""
+    dalle_prompt = dalle_chain.run(dalle_prompt_input)
 
-    print(f"DALL-E Prompt: {dalle_prompt}")
+    print(f"{dalle_prompt}")
 
     image_url = DallEAPIWrapper().run(dalle_prompt)
 
@@ -217,13 +234,13 @@ async def main(message):
     )
     print(f"Reply: {reply}")
 
-    image_url, dalle_prompt = generate_dalle_image(llmc, reply, agent_chain.memory)
+    image_url, dalle_prompt = generate_dalle_image(llmc, agent_chain.memory)
 
     elements = [
         cl.Image(name="Game Frame", display="inline", url=image_url),
     ]
 
-    await cl.Message(content=dalle_prompt, elements=elements).send()
+    await cl.Message(content="Image:", elements=elements).send()
 
     # Prune memory
     agent_chain.memory.prune()
