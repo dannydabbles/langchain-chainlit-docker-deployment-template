@@ -1,12 +1,15 @@
 """Python file to serve as the frontend"""
 from langchain.agents import Tool, AgentExecutor, OpenAIMultiFunctionsAgent
 from langchain.chat_models import ChatOpenAI
+from langchain.chains import ConversationChain
 from langchain.prompts import PromptTemplate, MessagesPlaceholder
-from langchain.memory import ConversationSummaryBufferMemory
+from langchain.memory import ConversationSummaryBufferMemory, ReadOnlySharedMemory
 from langchain.tools import DuckDuckGoSearchRun
 from langchain.schema.messages import SystemMessage, HumanMessage
 from langchain.callbacks.base import BaseCallbackHandler
+from langchain.utilities.dalle_image_generator import DallEAPIWrapper
 import random
+import aiofiles
 import chainlit as cl
 
 
@@ -146,8 +149,41 @@ def start():
     cl.user_session.set("agent_chain", agent_chain)
     cl.user_session.set("memory", memory)
     cl.user_session.set("tools", tools)
+    cl.user_session.set("llmc", llmc)
 
+def generate_dalle_image(llm, info, memory):
+    """Generate an image with DALL-E for the given text based on the conversation history thus far"""
 
+    # Make the prompt for the ConversationChain
+    template = """Compose a DALL-E prompt that will generate a single storyboard frame for the following protagonist text.  Use the conversation history as context to help generate the prompt.
+
+Protagonist: {input}
+
+Conversation History:
+{chat_history}
+"""
+    prompt = PromptTemplate(
+        template=template,
+        input_variables=["input", "chat_history"],
+    )
+
+    # Make a ConversationChain to write a prompt for DALL-E based on the text
+    dalle_chain = ConversationChain(
+        llm=llm,
+        prompt=prompt,
+        memory=ReadOnlySharedMemory(memory=memory),
+        verbose=True,
+    )
+
+    # Run the LLM chain
+    dalle_prompt = dalle_chain.run(input=info["input"])
+
+    print(f"DALL-E Prompt: {dalle_prompt}")
+
+    image_url = DallEAPIWrapper().run(dalle_prompt)
+
+    return image_url, dalle_prompt
+    
 class StreamHandler(BaseCallbackHandler):
     def __init__(self):
         self.msg = cl.Message(content="")
@@ -167,6 +203,7 @@ async def main(message):
 
     # Get the agent chain
     agent_chain = cl.user_session.get("agent_chain")
+    llmc = cl.user_session.get("llmc")
 
     # Call the agent chain
     reply = await agent_chain.acall(
@@ -179,6 +216,14 @@ async def main(message):
         ]
     )
     print(f"Reply: {reply}")
+
+    image_url, dalle_prompt = generate_dalle_image(llmc, reply, agent_chain.memory)
+
+    elements = [
+        cl.Image(name="Game Frame", display="inline", url=image_url),
+    ]
+
+    await cl.Message(content=dalle_prompt, elements=elements).send()
 
     # Prune memory
     agent_chain.memory.prune()
