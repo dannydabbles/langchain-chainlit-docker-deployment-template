@@ -162,7 +162,7 @@ class StreamHandler(BaseCallbackHandler):
         self.msg = cl.Message(content="")
 
 @cl.on_message
-async def main(message: str):
+async def main(message):
     """Main function"""
 
     # Get the agent chain
@@ -171,7 +171,7 @@ async def main(message: str):
     # Call the agent chain
     reply = await agent_chain.acall(
         {
-            "input": message,
+            "input": message.content,
         },
         callbacks=[
             cl.AsyncLangchainCallbackHandler(stream_final_answer=True),
