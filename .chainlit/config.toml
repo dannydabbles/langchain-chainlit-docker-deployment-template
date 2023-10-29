@@ -18,6 +18,7 @@ cache = false
 # Show the prompt playground
 prompt_playground = true
 multi_modal = false
+speech_to_text.enabled = true
 
 [UI]
 # Name of the app and chatbot.
