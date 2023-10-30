@@ -113,6 +113,8 @@ async def generate_dalle_image(text):
     ]
 
     await cl.Message(content=text, elements=elements).send()
+
+    return "Success"
     
 def get_memory(llm):
     """Create a memory buffer for the conversation"""
@@ -170,7 +172,8 @@ def get_conversation_chain(llm, memory, tools):
 
     prompt = OpenAIMultiFunctionsAgent.create_prompt(
         system_message=SystemMessage(content="""Never forget you are the Storyteller, and I am the protagonist. You are an experienced Game Master playing a homebrew tabletop story with your new friend, me. I will propose actions I plan to take and you will explain what happens when I take those actions. Speak in the first person from the perspective of the Game Master, and generate one relevant DALL-E image to go with the story before you speak. For describing actions that happen in the game world, wrap each description word block in '*' characters.
-Remember to *always* generate a relevant DALL-E image before you speak, or I won't see it!
+Remember to *always* generate one DALL-E image before you speak, or I will not see any images!
+Do not *ever* link directly to images or mention the images directly when you speak to me!
 Do not change roles unless acting out a character besides the protagonist!
 Do not *ever* speak from the perspective of the protagonist!
 Do not add anything else.
@@ -226,7 +229,7 @@ async def main(message):
 
     # Call the agent chain
     content = str(message.content)
-    content += "\n\nGenerate one DALL-E image too, but don't mention this sentence."
+    content += "\n\nDon't forget to generate an image, but don't directly mention it."
     reply = await agent_chain.acall(
         {
             "input": content,
