@@ -120,7 +120,7 @@ def get_memory(llm):
     memory_buffer = ConversationSummaryBufferMemory(
         llm=llm,
         memory_key="chat_history",
-        max_token_limit=12000,
+        max_token_limit=6000,
         ai_prefix=AI_PREFIX,
         human_prefix=HUMAN_PREFIX,
         input_key="input",
@@ -205,7 +205,7 @@ Stop speaking the moment you finish speaking from your perspective."""),
 def start():
     """Start the conversation"""
 
-    llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo-16k")
+    llmc = ChatOpenAI(temperature=.7, streaming=True, model="gpt-3.5-turbo")
 
     memory = get_memory(llmc)
     tools = get_tools(llmc)
